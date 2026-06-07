@@ -1,25 +1,45 @@
-# Inspyry Vector Generator — Claude skill
+# Inspyry Vector Generator — agent skill
 
-A [Claude](https://claude.com/claude-code) skill that generates clean, **flat-color
-vector (SVG)** artwork from a text prompt using the [Inspyry](https://inspyry.com)
-public API. Output is editable, scalable SVG — ideal for logos, icons, mascots,
-badges, and wordmarks.
+A portable **agent skill** that generates clean, **flat-color vector (SVG)**
+artwork from a text prompt using the [Inspyry](https://inspyry.com) public API.
+Output is editable, scalable SVG — ideal for logos, icons, mascots, badges, and
+wordmarks.
 
-It ships with a dependency-free Python client ([`scripts/generate.py`](scripts/generate.py))
-that drives the asynchronous *create → poll → save* flow, retries transient
-failures with exponential backoff, and exits with meaningful status codes.
+It's designed to plug into **any AI agent or LLM tool-calling setup**, not just
+one vendor. The core is a dependency-free Python CLI
+([`scripts/generate.py`](scripts/generate.py)) that drives the asynchronous
+*create → poll → save* flow, retries transient failures with exponential
+backoff, and exits with meaningful status codes — so any agent that can run a
+shell command (or call the underlying [HTTP API](#use-from-any-agent)) can use
+it. [`SKILL.md`](SKILL.md) is the model-readable manifest describing when and how
+to invoke it.
 
-## Install
+## Use with any agent
 
-Copy this directory into your Claude skills folder:
+The skill is intentionally vendor-neutral. Pick whichever integration fits your
+agent:
 
-```bash
-git clone git@github.com:dhiraj-salian/inspyry-vector-generator-skill.git \
-  ~/.claude/skills/inspyry-vector-generator
-```
+- **[Claude Code](https://claude.com/claude-code) / Claude Agent SDK** — clone
+  into the skills folder and it's discovered automatically:
+  ```bash
+  git clone git@github.com:dhiraj-salian/inspyry-vector-generator-skill.git \
+    ~/.claude/skills/inspyry-vector-generator
+  ```
+- **Any other agent (Cursor, Cline, LangChain/LlamaIndex tools, OpenAI/Gemini
+  function calling, custom loops)** — register the CLI as a tool. Give the model
+  the contents of [`SKILL.md`](SKILL.md) as the tool description/system context,
+  and have it shell out to:
+  ```bash
+  python3 scripts/generate.py "<prompt>" <output>.svg
+  ```
+  The `--json` flag returns a structured result (`{id,status,path,bytes,tags}`)
+  for easy parsing, and the [exit codes](#exit-codes) let the agent branch on
+  failures (auth, credits, timeout, …) without scraping text.
+- **No wrapper at all** — call the [HTTP API directly](#use-from-any-agent);
+  the CLI is just a convenience over a handful of REST endpoints.
 
-Claude Code discovers it automatically. The skill is described in
-[`SKILL.md`](SKILL.md), which Claude reads to decide when and how to use it.
+Whatever the host, behavior, prompting guidance, and the API are identical —
+[`SKILL.md`](SKILL.md) is the single source of truth.
 
 ## Prerequisites
 
@@ -70,6 +90,27 @@ python3 scripts/generate.py "bold lightning bolt icon, flat vector" -o out/bolt.
 | 6 | timed out waiting for the generation |
 | 7 | network error reaching the API |
 | 1 | any other error |
+
+## Use from any agent
+
+The CLI is a thin convenience over a small REST API, so an agent can skip it
+entirely and call the endpoints directly. Auth is a bearer token; generation is
+asynchronous (create, then poll until `status` is `succeeded`):
+
+```bash
+# create
+ID=$(curl -s -X POST "https://inspyry.com/api/v1/generations" \
+  -H "Authorization: Bearer $INSPYRY_API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"prompt":"a bold lightning bolt icon, flat vector"}' | jq -r .id)
+
+# poll until succeeded, then save the SVG
+curl -s "https://inspyry.com/api/v1/generations/$ID" \
+  -H "Authorization: Bearer $INSPYRY_API_TOKEN" | jq -r .svg > out.svg
+```
+
+A machine-readable OpenAPI spec is available at `GET
+https://inspyry.com/api/v1/openapi.json`. See [`SKILL.md`](SKILL.md) for the full
+endpoint and error reference.
 
 ## Prompting tips
 
